@@ -404,6 +404,12 @@ class LoadContext(Operator):
             print(axtod)
             self._parse_data(ob, axtod, None)
 
+            # Now that we have timestamps loaded, update our focalplane sample rate
+            (rate, dt, dt_min, dt_max, dt_std) = toast.utils.rate_from_times(
+                ob.shared[self.times].data
+            )
+            ob.telescope.focalplane.sample_rate = rate
+
             # Position and velocity of the observatory are simply computed.  Only the
             # first row of the process grid needs to do this.
             position = None
