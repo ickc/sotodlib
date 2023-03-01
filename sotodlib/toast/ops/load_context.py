@@ -408,7 +408,8 @@ class LoadContext(Operator):
             (rate, dt, dt_min, dt_max, dt_std) = toast.utils.rate_from_times(
                 ob.shared[self.times].data
             )
-            ob.telescope.focalplane.sample_rate = rate
+            ob.telescope.focalplane.sample_rate = rate * u.Hz
+            print(f"Updating sample rate to {ob.telescope.focalplane.sample_rate}")
 
             # Position and velocity of the observatory are simply computed.  Only the
             # first row of the process grid needs to do this.
@@ -432,9 +433,10 @@ class LoadContext(Operator):
                 bore_radec = toast.coordinates.azel_to_radec(
                     site,
                     ob.shared[self.times].data,
-                    ob.shared[self.boresight_azel].data,
+                    bore_azel,
                     use_ephem=True,
                 )
+                print(bore_radec)
             ob.shared[self.boresight_azel].set(bore_azel, offset=(0, 0), fromrank=0)
             ob.shared[self.boresight_radec].set(bore_radec, offset=(0, 0), fromrank=0)
             data.obs.append(ob)
