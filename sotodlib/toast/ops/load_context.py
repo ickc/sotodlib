@@ -20,7 +20,7 @@ from toast.observation import default_values as defaults
 
 import so3g
 
-from ...core import Context, AxisManager
+from ...core import Context, AxisManager, FlagManager
 from ...core.axisman import AxisInterface
 
 from ..instrument import SOFocalplane, SOSite
@@ -30,7 +30,9 @@ from ..instrument import SOFocalplane, SOSite
 class LoadContext(Operator):
     """Load one or more observations from a Context.
 
-        Given a context, load one or more observations.  The observation
+    Given a context, load one or more observations.  The context should exist
+    on all processes in the group.  The `readout_ids`, `detsets`, and `bands`
+    traits are 
 
         - can take context as an instance trait
 
@@ -98,6 +100,7 @@ class LoadContext(Operator):
 
     ax_det_signal = Unicode(
         "signal",
+        allow_none=True,
         help="Name of field to associate with det_data",
     )
 
@@ -106,11 +109,23 @@ class LoadContext(Operator):
         help="Tuples of (field, bit_value) merged to det_flags",
     )
 
-    ax_boresight_az = Unicode("boresight_az", help="Field with boresight Az")
+    ax_boresight_az = Unicode(
+        "boresight_az",
+        allow_none=True,
+        help="Field with boresight Az",
+    )
 
-    ax_boresight_el = Unicode("boresight_el", help="Field with boresight El")
+    ax_boresight_el = Unicode(
+        "boresight_el", 
+        allow_none=True,
+        help="Field with boresight El",
+    )
 
-    ax_boresight_roll = Unicode("boresight_roll", help="Field with boresight Roll")
+    ax_boresight_roll = Unicode(
+        "boresight_roll", 
+        allow_none=True,
+        help="Field with boresight Roll",
+    )
 
     axis_detector = Unicode(
         "dets", help="Name of the LabelAxis for the detector direction"
@@ -282,18 +297,23 @@ class LoadContext(Operator):
 
             # Convert any focalplane quaternion offsets to toast format
 
-            print(obs_meta)
-            print(det_props.colnames)
-            print(det_props)
-
             name_col = Column(name="name", data=det_props["det_info_readout_id"])
-            quat_col = Column(
-                name="quat",
-                data=toast.instrument_coords.xieta_to_quat(
+
+            if "focal_plane_xi" in det_props.colnames:
+                quat_data = toast.instrument_coords.xieta_to_quat(
                     det_props["focal_plane_xi"],
                     det_props["focal_plane_eta"],
                     det_props["focal_plane_gamma"],
-                ),
+                )
+            else:
+                # No detector offsets yet
+                quat_data = np.tile(
+                    np.array([0, 0, 0, 1], dtype=np.float64),
+                    len(det_props["det_info_readout_id"]),
+                ).reshape((-1, 4))
+            quat_col = Column(
+                name="quat",
+                data=quat_data,
             )
             det_props.add_column(quat_col, index=0)
             det_props.add_column(name_col, index=0)
@@ -336,31 +356,43 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples,),
                 dtype=np.float64,
             )
-            ob.shared.create_column(
-                self.azimuth,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
-            ob.shared.create_column(
-                self.elevation,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
-            ob.shared.create_column(
-                self.roll,
-                shape=(ob.n_local_samples,),
-                dtype=np.float64,
-            )
-            ob.shared.create_column(
-                self.boresight_azel,
-                shape=(ob.n_local_samples, 4),
-                dtype=np.float64,
-            )
-            ob.shared.create_column(
-                self.boresight_radec,
-                shape=(ob.n_local_samples, 4),
-                dtype=np.float64,
-            )
+
+            have_pointing = True
+            if self.ax_boresight_az is None:
+                have_pointing = False
+            else:
+                ob.shared.create_column(
+                    self.azimuth,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            if self.ax_boresight_el is None:
+                have_pointing = False
+            else:
+                ob.shared.create_column(
+                    self.elevation,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            if self.ax_boresight_roll is None:
+                have_pointing = False
+            else:
+                ob.shared.create_column(
+                    self.roll,
+                    shape=(ob.n_local_samples,),
+                    dtype=np.float64,
+                )
+            if have_pointing:
+                ob.shared.create_column(
+                    self.boresight_azel,
+                    shape=(ob.n_local_samples, 4),
+                    dtype=np.float64,
+                )
+                ob.shared.create_column(
+                    self.boresight_radec,
+                    shape=(ob.n_local_samples, 4),
+                    dtype=np.float64,
+                )
             if self.hwp_angle is not None:
                 ob.shared.create_column(
                     self.hwp_angle,
@@ -384,73 +416,76 @@ class LoadContext(Operator):
                 shape=(ob.n_local_samples,),
                 dtype=np.uint8,
             )
-            ob.shared.create_column(
-                defaults.position,
-                shape=(ob.n_local_samples, 3),
-                dtype=np.float64,
-            )
-            ob.shared.create_column(
-                defaults.velocity,
-                shape=(ob.n_local_samples, 3),
-                dtype=np.float64,
-            )
-            ob.detdata.create(
-                self.det_data, dtype=np.float64, units=self.det_data_units
-            )
-            ob.detdata.create(self.det_flags, dtype=np.uint8)
+            if have_pointing:
+                ob.shared.create_column(
+                    defaults.position,
+                    shape=(ob.n_local_samples, 3),
+                    dtype=np.float64,
+                )
+                ob.shared.create_column(
+                    defaults.velocity,
+                    shape=(ob.n_local_samples, 3),
+                    dtype=np.float64,
+                )
+            if self.ax_det_signal is not None:
+                ob.detdata.create(
+                    self.det_data, dtype=np.float64, units=self.det_data_units
+                )
+                ob.detdata.create(self.det_flags, dtype=np.uint8)
 
             # Now every process loads its data
             axtod = self.context.get_obs(obs_name, dets=ob.local_detectors)
-            print(axtod)
-            self._parse_data(ob, axtod, None)
+            self._parse_data(ob, have_pointing, axtod, None)
 
             # Now that we have timestamps loaded, update our focalplane sample rate
             (rate, dt, dt_min, dt_max, dt_std) = toast.utils.rate_from_times(
                 ob.shared[self.times].data
             )
             ob.telescope.focalplane.sample_rate = rate * u.Hz
-            print(f"Updating sample rate to {ob.telescope.focalplane.sample_rate}")
+            log.verbose_rank(
+                f"Updating sample rate to {ob.telescope.focalplane.sample_rate}",
+                comm=ob.comm.comm_group,
+            )
 
             # Position and velocity of the observatory are simply computed.  Only the
             # first row of the process grid needs to do this.
-            position = None
-            velocity = None
-            if ob.comm_col_rank == 0:
-                position, velocity = site.position_velocity(ob.shared[self.times])
-            ob.shared[defaults.position].set(position, offset=(0, 0), fromrank=0)
-            ob.shared[defaults.velocity].set(velocity, offset=(0, 0), fromrank=0)
+            if have_pointing:
+                position = None
+                velocity = None
+                if ob.comm_col_rank == 0:
+                    position, velocity = site.position_velocity(ob.shared[self.times])
+                ob.shared[defaults.position].set(position, offset=(0, 0), fromrank=0)
+                ob.shared[defaults.velocity].set(velocity, offset=(0, 0), fromrank=0)
 
-            # First row of the process grid computes boresight quaternions from
-            # boresight angles.
-            bore_azel = None
-            bore_radec = None
-            if ob.comm_col_rank == 0:
-                bore_azel = toast.qarray.from_lonlat_angles(
-                    -ob.shared[self.azimuth].data,
-                    ob.shared[self.elevation].data,
-                    ob.shared[self.roll].data,
-                )
-                bore_radec = toast.coordinates.azel_to_radec(
-                    site,
-                    ob.shared[self.times].data,
-                    bore_azel,
-                    use_ephem=True,
-                )
-                print(bore_radec)
-            ob.shared[self.boresight_azel].set(bore_azel, offset=(0, 0), fromrank=0)
-            ob.shared[self.boresight_radec].set(bore_radec, offset=(0, 0), fromrank=0)
+                # First row of the process grid computes boresight quaternions from
+                # boresight angles.
+                bore_azel = None
+                bore_radec = None
+                if ob.comm_col_rank == 0:
+                    bore_azel = toast.qarray.from_lonlat_angles(
+                        -ob.shared[self.azimuth].data,
+                        ob.shared[self.elevation].data,
+                        ob.shared[self.roll].data,
+                    )
+                    bore_radec = toast.coordinates.azel_to_radec(
+                        site,
+                        ob.shared[self.times].data,
+                        bore_azel,
+                        use_ephem=True,
+                    )
+                ob.shared[self.boresight_azel].set(bore_azel, offset=(0, 0), fromrank=0)
+                ob.shared[self.boresight_radec].set(bore_radec, offset=(0, 0), fromrank=0)
             data.obs.append(ob)
 
-    def _parse_data(self, obs, axman, base):
+    def _parse_data(self, obs, have_pointing, axman, base):
         # Some metadata has already been parsed, but some new values
         # may only show up when reading data, so we need to handle those
         # as well.
-        shared_ax_to_obs = {
-            self.ax_times: self.times,
-            self.ax_boresight_az: self.azimuth,
-            self.ax_boresight_el: self.elevation,
-            self.ax_boresight_roll: self.roll,
-        }
+        shared_ax_to_obs = {self.ax_times: self.times}
+        if have_pointing:
+            shared_ax_to_obs[self.ax_boresight_az] = self.azimuth
+            shared_ax_to_obs[self.ax_boresight_el] = self.elevation
+            shared_ax_to_obs[self.ax_boresight_roll] = self.roll
         shared_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_flags}
         shared_flag_fields = {x[0]: abs(x[1]) for x in self.ax_flags}
         det_flag_invert = {x[0]: (x[1] < 0) for x in self.ax_det_flags}
@@ -470,9 +505,12 @@ class LoadContext(Operator):
             if isinstance(axman[key], AxisInterface):
                 # This is one of the axes
                 continue
-            if isinstance(axman[key], AxisManager):
+            if isinstance(axman[key], FlagManager):
+                # Descend- Anything different we need to do here?
+                self._parse_data(obs, have_pointing, axman[key], key)
+            elif isinstance(axman[key], AxisManager):
                 # Descend
-                self._parse_data(obs, axman[key], key)
+                self._parse_data(obs, have_pointing, axman[key], key)
             else:
                 # FIXME:  It would be nicer if this information was available
                 # through a public member...
@@ -496,10 +534,8 @@ class LoadContext(Operator):
                         # This is detector data.  See if it is one of the standard
                         # fields we are parsing.
                         if data_key == self.ax_det_signal:
-                            print(f"Add detector signal {data_key}")
                             obs.detdata[self.det_data][:, :] = axman[key]
                         elif data_key in det_flag_fields:
-                            print(f"Add detector flags {data_key}")
                             if isinstance(axman[key], so3g.proj.RangesMatrix):
                                 temp = np.empty(obs.n_local_samples, dtype=np.uint8)
                                 if det_flag_invert[data_key]:
@@ -528,7 +564,6 @@ class LoadContext(Operator):
                                 obs.detdata[self.det_flags][:] |= temp
                         else:
                             # Some other kind of detector data
-                            print(f"Add detector data {data_key} <-- {key}")
                             if len(axman[key].shape) > 2:
                                 shp = axman[key].shape[2:]
                             else:
@@ -545,7 +580,6 @@ class LoadContext(Operator):
                             om[key] = axman[key]
                 elif field_axes[0] == self.axis_sample:
                     # This is shared data
-                    print(f"{key} --> {data_key}")
                     if isinstance(axman[key], so3g.proj.Ranges):
                         # This is a set of 1D shared ranges.  Translate this to a
                         # toast interval list.
@@ -556,9 +590,6 @@ class LoadContext(Operator):
                             obs.shared[self.times], samplespans=samplespans
                         )
                     elif data_key in shared_ax_to_obs:
-                        print(
-                            f"Add shared telescope field {shared_ax_to_obs[data_key]} <-- {key}"
-                        )
                         axbuf = None
                         if obs.comm_col_rank == 0:
                             axbuf = axman[key]
@@ -569,7 +600,6 @@ class LoadContext(Operator):
                         )
                     elif data_key in shared_flag_fields:
                         axbuf = None
-                        print(f"Add shared flag {self.shared_flags} <-- {key}")
                         if obs.comm_col_rank == 0:
                             axbuf = np.array(obs.shared[self.shared_flags])
                             temp = shared_flag_fields[data_key] * np.ones_like(axbuf)
@@ -585,7 +615,6 @@ class LoadContext(Operator):
                         )
                     else:
                         # This is some other shared data.
-                        print(f"Add shared data {data_key} <-- {key}")
                         obs.shared.create_column(
                             data_key,
                             shape=axman[key].shape,
