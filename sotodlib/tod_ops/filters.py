@@ -437,6 +437,18 @@ def high_pass_sine2(freqs, tod, cutoff, width=None):
     return 0.5 + 0.5 * np.sin(phase)
 
 @fft_filter
+def counter_1_over_f(freqs, tod, fk, n, s):
+    """
+    Counter 1/f filter for noise w/ PSD that follows:
+    
+    w*(1 + (fk/f)**n) 
+
+    where w is the white noise level, fk is the knee frequency, and
+    n is the 1/f index.
+    """
+    return np.sqrt(1/(1+s*(fk/freqs)**n))
+
+@fft_filter
 def iir_filter(freqs, tod, b=None, a=None, fscale=1., iir_params=None,
                invert=False):
     """Infinite impulse response (IIR) filter.  This sort of filter is
