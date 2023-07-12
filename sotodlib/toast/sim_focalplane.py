@@ -53,7 +53,7 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, pos_rotate=None, killpo
     centers = [
         xieta_to_quat(
             0.25 * np.sqrt(3.0) * width_rad + 0.5 * gap_rad,
-            -0.25 * width_rad - gap_rad / (2 * np.sqrt(3.0)),
+            -0.25 * width_rad - 0.5 * gap_rad / np.sqrt(3.0),
             np.pi / 6,
         ),
         xieta_to_quat(
@@ -63,7 +63,7 @@ def rhombus_hex_layout(rhombus_npos, rhombus_width, gap, pos_rotate=None, killpo
         ),
         xieta_to_quat(
             -0.25 * np.sqrt(3.0) * width_rad - 0.5 * gap_rad,
-            -0.25 * width_rad - gap_rad / (2 * np.sqrt(3.0)),
+            -0.25 * width_rad - 0.5 * gap_rad / np.sqrt(3.0),
             5 * np.pi / 6,
         ),
     ]
@@ -158,14 +158,16 @@ def sim_wafer_detectors(
     kill = []
     if wprops["packing"] == "F":
         # Feedhorn (NIST style)
-        gap = platescale * wprops["rhombusgap"]
+        # The "gap" is the additional space beyond the normal pixel
+        # separation.
+        gap = platescale * wprops["rhombusgap"] + pixsep
         nrhombus = npix // 3
 
         # This dim is also the number of pixels along the short axis.
         dim = rhomb_dim(nrhombus)
 
         # This is the center-center distance along the short axis
-        width = (dim - 1) * pixsep
+        width = dim * pixsep
 
         # The orientation within each rhombus alternates between zero and 45
         # degrees.  However there is an offset.  We choose this arbitrarily
@@ -623,7 +625,8 @@ def sim_telescope_detectors(hw, tele, tube_slots=None, det_info=None, no_darks=F
         # locations are rotated from a normal layout.
         wcenters = hex_layout(
             7,
-            (3.0 * np.sqrt(3.0) / 2) * waferspace * u.degree,
+            #(3.0 * np.sqrt(3.0) / 2) * waferspace * u.degree,
+            2 * waferspace * u.degree,
             "",
             "",
             np.zeros(7) * u.degree,
