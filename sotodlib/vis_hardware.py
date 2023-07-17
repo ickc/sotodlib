@@ -183,7 +183,7 @@ def plot_detectors(
         dir = qa.rotate(quats, zaxis)
         orient = qa.rotate(quats, xaxis)
 
-        small = np.fabs(1.0 - dir[:, 2]) < 1.0e-6
+        small = np.fabs(1.0 - dir[:, 2]) < 1.0e-12
         not_small = np.logical_not(small)
         xp = np.zeros(n_det, dtype=np.float64)
         yp = np.zeros(n_det, dtype=np.float64)
